@@ -621,14 +621,14 @@ read_to_string(const char *path)
   return str;
 }
 
-static GLuint
+static u32
 compile_shader(GLenum shader_type, const char *src)
 {
-  GLuint shader = glCreateShader(shader_type);
+  u32 shader = glCreateShader(shader_type);
   glShaderSource(shader, 1, &src, NULL);
   glCompileShader(shader);
 
-  GLint success;
+  i32 success;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
   if (!success) {
     char info_log[512];
@@ -639,17 +639,17 @@ compile_shader(GLenum shader_type, const char *src)
   return shader;
 }
 
-static GLuint
-link_shaders(GLuint vertex, GLuint fragment)
+static u32
+link_shaders(u32 vertex, u32 fragment)
 {
-  GLuint program = glCreateProgram();
+  u32 program = glCreateProgram();
   glAttachShader(program, vertex);
   glAttachShader(program, fragment);
   glLinkProgram(program);
   glDeleteShader(vertex);
   glDeleteShader(fragment);
 
-  GLint success;
+  i32 success;
   glGetProgramiv(program, GL_LINK_STATUS, &success);
   if (!success) {
     char info_log[512];
@@ -660,13 +660,13 @@ link_shaders(GLuint vertex, GLuint fragment)
   return program;
 }
 
-GLuint
+u32
 load_shaders(const char *vertex_path, const char *fragment_path)
 {
   char *vertex_source = read_to_string(vertex_path);
   char *fragment_source = read_to_string(fragment_path);
-  GLuint vertex = compile_shader(GL_VERTEX_SHADER, vertex_source);
-  GLuint fragment = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
+  u32 vertex = compile_shader(GL_VERTEX_SHADER, vertex_source);
+  u32 fragment = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
   delete[] vertex_source;
   delete[] fragment_source;
   return link_shaders(vertex, fragment);
