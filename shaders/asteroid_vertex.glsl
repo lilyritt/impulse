@@ -18,5 +18,5 @@ main(void)
   vertpos = vec3(model * vec4(pos, 1.0));
   texpos = tex;
   // texpos = vec3(model * vec4(tex, 0.0, 1.0));
-  gl_Position = projection * view  * model * vec4(pos, 1.0);
+  gl_Position = view  * model * vec4(pos, 1.0);
 }

@@ -1,4 +1,4 @@
-CFLAGS += -O2 -g -Wall -Wextra -Werror -I include/
+CFLAGS += -pipe -O2 -g -Wall -Wextra -Werror -I include/
 LDFLAGS = -lglfw -lm -lassimp
 OBJECTS = lib/glad.o
 

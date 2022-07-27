@@ -29,7 +29,7 @@ typedef double   f64;
 
 void framebuffer_size_callback(GLFWwindow *, i32, i32);
 char *read_to_string(const char *);
-u32 load_shaders(const char *, const char *);
+u32 load_shaders(const char *, const char *, const char *);
 void setup(void);
 void add_asteroid(void);
 void shoot_laser(f64, f32);
@@ -50,6 +50,7 @@ struct asteroid {
   struct point pos;
   struct point vel;
   u8 health;
+  f64 exploded_time;
 };
 
 struct laser {
@@ -100,7 +101,9 @@ struct state {
   std::vector<struct laser> lasers;
 };
 
-static const u8 MAX_ASTEROID_HEALTH = 3;
+static const u8 ASTEROID_HEALTH = 3;
+static const f64 LASER_DURATION = 1.5;
+static const f64 EXPLOSION_DURATION = 0.75;
 
 static struct state *state;
 
@@ -117,7 +120,6 @@ main(int, char **)
     draw();
     glfwSwapBuffers(state->window);
     glfwPollEvents();
-    // printf("FPS: %.0f    \r", 1.0 / (glfwGetTime() - time)); fflush(stdout);
   }
 
   delete state;
@@ -182,11 +184,11 @@ setup(void)
     /* Left booster */
      0.0,   0.0,   0.0,
     -0.5,   0.0,   0.0,
-    -0.3,  -0.5,   0.1,
+    -0.3,  -0.5,   0.0,
 
     /* Right booster */
      0.0,   0.0,   0.0,
-     0.3,  -0.5,   0.1,
+     0.3,  -0.5,   0.0,
      0.5,   0.0,   0.0,
   };
 
@@ -201,7 +203,7 @@ setup(void)
   glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * sizeof(f32), (void *) 0);
   glEnableVertexAttribArray(0);
 
-  state->shaders.ship = load_shaders("shaders/ship_vertex.glsl", "shaders/ship_fragment.glsl");
+  state->shaders.ship = load_shaders("shaders/ship_vertex.glsl", "shaders/ship_fragment.glsl", NULL);
 
   /* Lasers */
   f32 laser[] = {
@@ -227,21 +229,9 @@ setup(void)
   glVertexAttribPointer(0, 3, GL_FLOAT, false, 3 * sizeof(f32), (void *) 0);
   glEnableVertexAttribArray(0);
 
-  state->shaders.laser = load_shaders("shaders/laser_vertex.glsl", "shaders/laser_fragment.glsl");
+  state->shaders.laser = load_shaders("shaders/laser_vertex.glsl", "shaders/laser_fragment.glsl", NULL);
 
   /* Asteroids */
-  /*
-  f32 asteroid[] = {
-     1.0,  1.0,  0.0,
-    -1.0,  1.0,  0.0,
-    -1.0, -1.0,  0.0,
-
-     1.0,  1.0,  0.0,
-    -1.0, -1.0,  0.0,
-     1.0, -1.0,  0.0,
-  };
-  */
-
   Assimp::Importer importer;
   const struct aiScene *phobos = importer.ReadFile("data/phobos.glb",
                                                    aiProcessPreset_TargetRealtime_Quality);
@@ -252,7 +242,6 @@ setup(void)
   assert(phobos->mNumMeshes == 1);
 
   // 1 mesh, 2 mats, 1 texture, yes has normals
-
   const struct aiMesh *phobos_mesh = phobos->mMeshes[0];
   state->asteroid_indices  = phobos_mesh->mNumFaces * 3;
 
@@ -326,7 +315,9 @@ setup(void)
   delete[] astr_indices;
   delete[] astr_vertices;
 
-  state->shaders.asteroid = load_shaders("shaders/asteroid_vertex.glsl", "shaders/asteroid_fragment.glsl");
+  state->shaders.asteroid = load_shaders("shaders/asteroid_vertex.glsl",
+                                         "shaders/asteroid_fragment.glsl",
+                                         "shaders/asteroid_geometry.glsl");
 
   // #9dd5e0
   // glClearColor(157.0 / 255.0, 213.0 / 255.0, 224.0 / 255.0, 1.0);
@@ -349,13 +340,14 @@ void
 add_asteroid(void)
 {
   struct asteroid astr;
+  astr.exploded_time = 0.0;
   astr.vel.x = (drand48() - 0.5) * 5.0;
   astr.vel.y = (drand48() - 0.5) * 5.0;
-  astr.health = MAX_ASTEROID_HEALTH;
+  astr.health = ASTEROID_HEALTH;
   do {
     astr.pos.x = (drand48() - 0.5) * 20.0;
     astr.pos.y = (drand48() - 0.5) * 20.0;
-  } while (asteroid_collision(&astr, 4.0));
+  } while (asteroid_collision(&astr, 5.0));
   state->asteroids.push_back(astr);
 }
 
@@ -423,14 +415,25 @@ update(f64 dt)
   state->pos.y += state->vel.y * dt;
   clamp_boundry(&state->pos);
 
+  f32 asteroid_speed = 1.0;
+  for (u32 i = 0; i < state->asteroids.size(); ++i) {
+    struct asteroid &astr = state->asteroids[i];
+    astr.pos.x += astr.vel.x * asteroid_speed * dt;
+    astr.pos.y += astr.vel.y * asteroid_speed * dt;
+    clamp_boundry(&astr.pos);
+  }
+
   /* Asteroid collision */
   f32 asteroid_size = 1.2;
   for (u32 i = 0; i < state->asteroids.size(); ++i) {
     struct asteroid &a = state->asteroids[i];
-    if (asteroid_collision(&a, 1.9)) {
+    if (asteroid_collision(&a, 1.9) && a.exploded_time == 0.0) {
       --state->health;
-      state->asteroids.erase(state->asteroids.begin() + i--);
       update_scoreboard();
+      a.exploded_time = time;
+      state->vel.x *= 0.1;
+      state->vel.y *= 0.1;
+      // state->asteroids.erase(state->asteroids.begin() + i--);
       if (state->health == 0) {
         puts("\nGame over!");
         glfwSetWindowShouldClose(state->window, true);
@@ -443,9 +446,9 @@ update(f64 dt)
   if ((glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS ||
        glfwGetKey(w, GLFW_KEY_X) == GLFW_PRESS) &&
       time - state->last_laser >= cooldown) {
-    if (state-> score < 10)
+    if (state-> score < 15)
       shoot_laser(time, state->dir);
-    else if (state-> score < 20)
+    else if (state-> score < 40)
       for (f32 i = -0.5; i <= 0.5; i += 1.0)
         shoot_laser(time, state->dir + i * 7.5);
     else
@@ -453,18 +456,17 @@ update(f64 dt)
         shoot_laser(time, state->dir + i * 15.0);
   }
 
-  f64 laser_duration = 1.0;
   f32 laser_speed = 15.0;
   for (u32 i = 0; i < state->lasers.size(); ++i) {
     struct laser &l = state->lasers[i];
-    f32 first_boost = l.timestamp == time ? 2 : 1;
+    f32 first_boost = l.timestamp == time ? 2.0 : 1.0;
     l.pos.x += l.vel.x * laser_speed * first_boost * dt;
     l.pos.y += l.vel.y * laser_speed * first_boost * dt;
 
     clamp_boundry(&l.pos);
 
     /* Kill dead lasers */
-    if (time - l.timestamp >= laser_duration) {
+    if (time - l.timestamp >= LASER_DURATION) {
       state->lasers.erase(state->lasers.begin() + i--);
       continue;
     }
@@ -473,30 +475,32 @@ update(f64 dt)
     for (u32 j = 0; j < state->asteroids.size(); ++j) {
       struct asteroid &a = state->asteroids[j];
       if (fabsf(l.pos.x - a.pos.x) <= asteroid_size &&
-          fabsf(l.pos.y - a.pos.y) <= asteroid_size) {
-        a.health -= 1;
-        state->lasers.erase(state->lasers.begin() + i--);
+          fabsf(l.pos.y - a.pos.y) <= asteroid_size &&
+          a.exploded_time == 0.0) {
+        if (a.health > 0) {
+          --a.health;
+          state->lasers.erase(state->lasers.begin() + i--);
+        }
         if (a.health == 0) {
           ++state->score;
-          state->asteroids.erase(state->asteroids.begin() + j--);
           update_scoreboard();
+          a.exploded_time = time;
           continue;
         }
       }
     }
   }
 
-  /* Move asteroids */
-  f32 asteroid_speed = 1.0;
+  /* Kill dead asteroids */
   for (u32 i = 0; i < state->asteroids.size(); ++i) {
-    struct asteroid &astr = state->asteroids[i];
-    astr.pos.x += astr.vel.x * asteroid_speed * dt;
-    astr.pos.y += astr.vel.y * asteroid_speed * dt;
-    clamp_boundry(&astr.pos);
+    struct asteroid &a = state->asteroids[i];
+    if (a.exploded_time != 0.0 && time - a.exploded_time > EXPLOSION_DURATION)
+      state->asteroids.erase(state->asteroids.begin() + i--);
   }
 
+  /* Respawn asteroids */
   if (state->asteroids.empty())
-    for (u8 i = 0; i < 5; ++i)
+    for (u8 i = 0; i < 7; ++i)
       add_asteroid();
 
 
@@ -516,6 +520,11 @@ update(f64 dt)
     state->fov += mod * 10.0 * dt;
   }
 
+  if (glfwGetKey(w, GLFW_KEY_F5) == GLFW_PRESS) {
+    state->health = 5;
+    update_scoreboard();
+  }
+
   // printf("dir: %.3f velocity: %.3f %.3f pos: %.3f %.3f\r", state->dir, state->vel.x, state->vel.y, state->pos.x, state->pos.y); fflush(stdout);
 
 }
@@ -523,10 +532,12 @@ update(f64 dt)
 void
 draw(void)
 {
+  f64 time = glfwGetTime();
+
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
   glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -20.0f));
-  glm::mat4 projection = glm::perspective(glm::radians(state->fov), aspect_ratio(), 0.1f, 100.0f);
+  glm::mat4 projection = glm::perspective(glm::radians(state->fov), aspect_ratio(), 0.01f, 100.0f);
 
   /* Asteroids */
   glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -542,15 +553,20 @@ draw(void)
     i32 loc_projection = glGetUniformLocation(state->shaders.asteroid, "projection");
     i32 loc_health = glGetUniformLocation(state->shaders.asteroid, "health");
     i32 loc_lightpos = glGetUniformLocation(state->shaders.asteroid, "lightPos");
+    i32 loc_exploded = glGetUniformLocation(state->shaders.asteroid, "exploded");
     glUniformMatrix4fv(loc_model, 1, false, glm::value_ptr(model));
     glUniformMatrix4fv(loc_view, 1, false, glm::value_ptr(view));
     glUniformMatrix4fv(loc_projection, 1, false, glm::value_ptr(projection));
     glUniform3f(loc_lightpos, state->pos.x, state->pos.y, 4.0);
-    glUniform1f(loc_health, astr.health / (f32) MAX_ASTEROID_HEALTH);
+    glUniform1f(loc_health, astr.health / (f32) ASTEROID_HEALTH);
+    if (astr.exploded_time == 0.0) {
+      glUniform1f(loc_exploded, 0.0);
+    } else {
+      glUniform1f(loc_exploded, (time - astr.exploded_time) / EXPLOSION_DURATION);
+    }
     glBindTexture(GL_TEXTURE_2D, state->asteroid_texture);
     glDrawElements(GL_TRIANGLES, state->asteroid_indices, GL_UNSIGNED_INT, 0);
   }
-
 
   /* Lasers */
   glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -562,6 +578,8 @@ draw(void)
     i32 loc_model = glGetUniformLocation(state->shaders.laser, "model");
     i32 loc_view = glGetUniformLocation(state->shaders.laser, "view");
     i32 loc_projection = glGetUniformLocation(state->shaders.laser, "projection");
+    i32 loc_life = glGetUniformLocation(state->shaders.laser, "life");
+    glUniform1f(loc_life, (time - l.timestamp) / LASER_DURATION);
     glUniformMatrix4fv(loc_model, 1, false, glm::value_ptr(model));
     glUniformMatrix4fv(loc_view, 1, false, glm::value_ptr(view));
     glUniformMatrix4fv(loc_projection, 1, false, glm::value_ptr(projection));
@@ -608,6 +626,8 @@ update_scoreboard(void)
 char *
 read_to_string(const char *path)
 {
+  if (path == NULL)
+    return NULL;
   FILE *f = fopen(path, "r");
   if (f == NULL)
     err(EXIT_FAILURE, "%s", path);
@@ -640,14 +660,16 @@ compile_shader(GLenum shader_type, const char *src)
 }
 
 static u32
-link_shaders(u32 vertex, u32 fragment)
+link_shaders(u32 nshaders, u32 *shaders)
 {
   u32 program = glCreateProgram();
-  glAttachShader(program, vertex);
-  glAttachShader(program, fragment);
+  for (u32 i = 0; i < nshaders; ++i)
+    glAttachShader(program, shaders[i]);
+
   glLinkProgram(program);
-  glDeleteShader(vertex);
-  glDeleteShader(fragment);
+
+  for (u32 i = 0; i < nshaders; ++i)
+    glDeleteShader(shaders[i]);
 
   i32 success;
   glGetProgramiv(program, GL_LINK_STATUS, &success);
@@ -661,15 +683,25 @@ link_shaders(u32 vertex, u32 fragment)
 }
 
 u32
-load_shaders(const char *vertex_path, const char *fragment_path)
+load_shaders(const char *vertex_path,
+             const char *fragment_path,
+             const char *geometry_path)
 {
   char *vertex_source = read_to_string(vertex_path);
   char *fragment_source = read_to_string(fragment_path);
-  u32 vertex = compile_shader(GL_VERTEX_SHADER, vertex_source);
-  u32 fragment = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
+  char *geometry_source = read_to_string(geometry_path);
+  u32 shaders[3];
+  u32 nshaders = 2;
+  shaders[0] = compile_shader(GL_VERTEX_SHADER, vertex_source);
+  shaders[1] = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
   delete[] vertex_source;
   delete[] fragment_source;
-  return link_shaders(vertex, fragment);
+  if (geometry_source) {
+    shaders[2] = compile_shader(GL_GEOMETRY_SHADER, geometry_source);
+    delete[] geometry_source;
+    ++nshaders;
+  }
+  return link_shaders(nshaders, shaders);
 }
 
 void
