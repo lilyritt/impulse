@@ -92,6 +92,7 @@ struct state {
   u8 health;
   u32 score;
   f64 last_laser; /* for laser cooldown */
+  u32 laser_pattern;
 
   u32 asteroid_indices;
   u32 asteroid_texture;
@@ -101,8 +102,8 @@ struct state {
   std::vector<struct laser> lasers;
 };
 
-static const u8 ASTEROID_HEALTH = 3;
-static const f64 LASER_DURATION = 1.5;
+static const u8 ASTEROID_MAX_HEALTH = 4;
+static const f64 LASER_DURATION = 1.0;
 static const f64 EXPLOSION_DURATION = 0.75;
 
 static struct state *state;
@@ -116,10 +117,10 @@ main(int, char **)
   while (!glfwWindowShouldClose(state->window)) {
     dt = glfwGetTime() - time;
     time = glfwGetTime();
+    glfwPollEvents();
     update(dt);
     draw();
     glfwSwapBuffers(state->window);
-    glfwPollEvents();
   }
 
   delete state;
@@ -140,6 +141,7 @@ setup(void)
   state->vel.y = 0.0;
   state->boost = false;
   state->last_laser = 0.0;
+  state->laser_pattern = 0;
   state->fov = 80.0;
   puts("IMPULSE");
   update_scoreboard();
@@ -149,7 +151,7 @@ setup(void)
 
   glfwInit();
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 4);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   atexit(glfwTerminate);
 
@@ -343,7 +345,7 @@ add_asteroid(void)
   astr.exploded_time = 0.0;
   astr.vel.x = (drand48() - 0.5) * 5.0;
   astr.vel.y = (drand48() - 0.5) * 5.0;
-  astr.health = ASTEROID_HEALTH;
+  astr.health = ASTEROID_MAX_HEALTH;
   do {
     astr.pos.x = (drand48() - 0.5) * 20.0;
     astr.pos.y = (drand48() - 0.5) * 20.0;
@@ -355,11 +357,12 @@ void
 shoot_laser(f64 time, f32 dir)
 {
   f32 ship_influence = 0.05;
+  f32 direction = dir + (drand48() - 0.5) * 5.0;
   struct laser laser;
   laser.pos.x = state->pos.x;
   laser.pos.y = state->pos.y;
-  laser.vel.x = state->vel.x * ship_influence - cosf(to_rads(dir));
-  laser.vel.y = state->vel.y * ship_influence + sinf(to_rads(dir));
+  laser.vel.x = state->vel.x * ship_influence - cosf(to_rads(direction));
+  laser.vel.y = state->vel.y * ship_influence + sinf(to_rads(direction));
   laser.timestamp = state->last_laser = time;
   state->lasers.push_back(laser);
 }
@@ -442,7 +445,7 @@ update(f64 dt)
   }
 
   /* Shooting */
-  f64 cooldown = 0.15;
+  f64 cooldown = 0.1;
   if ((glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS ||
        glfwGetKey(w, GLFW_KEY_X) == GLFW_PRESS) &&
       time - state->last_laser >= cooldown) {
@@ -503,6 +506,12 @@ update(f64 dt)
     for (u8 i = 0; i < 7; ++i)
       add_asteroid();
 
+  if (glfwGetKey(w, GLFW_KEY_0) == GLFW_PRESS) state->laser_pattern = 0;
+  if (glfwGetKey(w, GLFW_KEY_1) == GLFW_PRESS) state->laser_pattern = 1;
+  if (glfwGetKey(w, GLFW_KEY_2) == GLFW_PRESS) state->laser_pattern = 2;
+  if (glfwGetKey(w, GLFW_KEY_3) == GLFW_PRESS) state->laser_pattern = 3;
+  if (glfwGetKey(w, GLFW_KEY_4) == GLFW_PRESS) state->laser_pattern = 4;
+  if (glfwGetKey(w, GLFW_KEY_5) == GLFW_PRESS) state->laser_pattern = 5;
 
   /* Debug */
   if (glfwGetKey(w, GLFW_KEY_F1) == GLFW_PRESS) {
@@ -558,12 +567,11 @@ draw(void)
     glUniformMatrix4fv(loc_view, 1, false, glm::value_ptr(view));
     glUniformMatrix4fv(loc_projection, 1, false, glm::value_ptr(projection));
     glUniform3f(loc_lightpos, state->pos.x, state->pos.y, 4.0);
-    glUniform1f(loc_health, astr.health / (f32) ASTEROID_HEALTH);
-    if (astr.exploded_time == 0.0) {
+    glUniform1f(loc_health, astr.health / (f32) ASTEROID_MAX_HEALTH);
+    if (astr.exploded_time == 0.0)
       glUniform1f(loc_exploded, 0.0);
-    } else {
+    else
       glUniform1f(loc_exploded, (time - astr.exploded_time) / EXPLOSION_DURATION);
-    }
     glBindTexture(GL_TEXTURE_2D, state->asteroid_texture);
     glDrawElements(GL_TRIANGLES, state->asteroid_indices, GL_UNSIGNED_INT, 0);
   }
@@ -579,7 +587,9 @@ draw(void)
     i32 loc_view = glGetUniformLocation(state->shaders.laser, "view");
     i32 loc_projection = glGetUniformLocation(state->shaders.laser, "projection");
     i32 loc_life = glGetUniformLocation(state->shaders.laser, "life");
+    i32 loc_pattern = glGetUniformLocation(state->shaders.laser, "pattern");
     glUniform1f(loc_life, (time - l.timestamp) / LASER_DURATION);
+    glUniform1ui(loc_pattern, state->laser_pattern);
     glUniformMatrix4fv(loc_model, 1, false, glm::value_ptr(model));
     glUniformMatrix4fv(loc_view, 1, false, glm::value_ptr(view));
     glUniformMatrix4fv(loc_projection, 1, false, glm::value_ptr(projection));
